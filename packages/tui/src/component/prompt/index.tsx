@@ -350,7 +350,7 @@ export function Prompt(props: PromptProps) {
     }, 0)
   })
 
-  // Live IDE follow (opencode-ide-bridge plugin): mirror the editor's current
+  // Live IDE follow (opencode-vsc-bridge plugin): mirror the editor's current
   // file/selection as a trailing chip in the prompt. The chip is a real file
   // part + extmark so onContentChange's syncExtmarksWithPromptParts keeps it
   // aligned; updates rewrite the chip range and re-register it. Local dev
@@ -422,17 +422,17 @@ export function Prompt(props: PromptProps) {
     renderLive()
   }
   const liveText = (data: Record<string, unknown>) => (typeof data.text === "string" ? data.text : "")
-  event.on("rpc.opencode-ide-bridge.context", (evt, { directory }) => {
+  event.on("rpc.opencode-vsc-bridge.context", (evt, { directory }) => {
     if (!liveDirectory(directory)) return
     setLiveChip(liveText(evt.data))
   })
-  event.on("rpc.opencode-ide-bridge.pin", (evt, { directory }) => {
+  event.on("rpc.opencode-vsc-bridge.pin", (evt, { directory }) => {
     if (!liveDirectory(directory)) return
     // Commit the chip: it becomes an ordinary file mention, no longer replaced.
     if (!liveChip && liveText(evt.data)) setLiveChip(liveText(evt.data))
     liveChip = undefined
   })
-  event.on("rpc.opencode-ide-bridge.clear", (_evt, { directory }) => {
+  event.on("rpc.opencode-vsc-bridge.clear", (_evt, { directory }) => {
     if (!liveDirectory(directory)) return
     setLiveChip("")
   })

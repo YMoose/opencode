@@ -9,7 +9,7 @@ beforeEach(() => takeDraft(undefined))
 const rpc = (method: string, text: string) => ({
   id: `evt_${Math.random().toString(36).slice(2)}`,
   created: Date.now(),
-  type: `rpc.opencode-ide-bridge.${method}`,
+  type: `rpc.opencode-vsc-bridge.${method}`,
   location: { directory },
   data: { text },
 })
