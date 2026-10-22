@@ -11,6 +11,7 @@ import {
 } from "@opentui/core"
 import { createEffect, createMemo, onMount, createSignal, onCleanup, on, Show, Switch, Match, For } from "solid-js"
 import path from "path"
+import { pathToFileURL } from "node:url"
 import { useLocal } from "../../context/local"
 import { useTheme, useThemes } from "../../context/theme"
 import { tint } from "../../theme/color"
@@ -347,6 +348,93 @@ export function Prompt(props: PromptProps) {
       input.gotoBufferEnd()
       renderer.requestRender()
     }, 0)
+  })
+
+  // Live IDE follow (opencode-ide-bridge plugin): mirror the editor's current
+  // file/selection as a trailing chip in the prompt. The chip is a real file
+  // part + extmark so onContentChange's syncExtmarksWithPromptParts keeps it
+  // aligned; updates rewrite the chip range and re-register it. Local dev
+  // experiment, not upstreamed: no config gate on purpose.
+  let liveChip: { start: number; end: number; extmarkId: number; partIndex: number } | undefined
+  const liveDirectory = (directory: string | undefined) =>
+    directory === (currentLocation.current?.directory ?? data.location.default().directory)
+  const renderLive = () => {
+    setTimeout(() => {
+      if (!input || input.isDestroyed) return
+      input.invalidateIntrinsicSize()
+      renderer.requestRender()
+    }, 0)
+  }
+  const registerLiveChip = (start: number, text: string): typeof liveChip => {
+    const end = start + measure(text)
+    const extmarkId = input.extmarks.create({
+      start,
+      end,
+      virtual: true,
+      styleId: fileStyleId,
+      typeId: promptPartTypeId,
+    })
+    // Turn the chip text (`@rel/path#L9-19`) into a readable file URI: the
+    // server resolves attachments with file:// URLs and ?start&end line ranges.
+    const base = currentLocation.current?.directory ?? data.location.default().directory
+    const body = text.slice(1)
+    const rangeMatch = /#L(\d+)(?:-(\d+))?$/.exec(body)
+    const rel = rangeMatch ? body.slice(0, rangeMatch.index) : body
+    const url = pathToFileURL(path.resolve(base, rel))
+    if (rangeMatch) {
+      url.searchParams.set("start", rangeMatch[1])
+      url.searchParams.set("end", rangeMatch[2] ?? rangeMatch[1])
+    }
+    let partIndex = 0
+    setStore(
+      produce((draft) => {
+        partIndex = (draft.prompt.files ??= []).length
+        draft.prompt.files!.push({ uri: url.href, mention: { start, end, text } })
+        draft.extmarkToPart.set(extmarkId, { type: "file", index: partIndex })
+      }),
+    )
+    return { start, end, extmarkId, partIndex }
+  }
+  const setLiveChip = (text: string) => {
+    if (!input || input.isDestroyed) return
+    if (!liveChip) {
+      if (!text) return
+      const start = input.plainText.length
+      input.insertText(text + " ")
+      liveChip = registerLiveChip(start, text)
+      renderLive()
+      return
+    }
+    // Rewrite the chip range (chip.end covers the mention; the trailing space
+    // follows it, so extend one char to swallow it and avoid stray doubles).
+    const chip = liveChip
+    const current = input.plainText
+    input.extmarks.clear()
+    input.replaceText(current.slice(0, chip.start) + (text ? text + " " : "") + current.slice(chip.end + 1))
+    setStore(
+      produce((draft) => {
+        draft.prompt.files = (draft.prompt.files ?? []).filter((_, index) => index !== chip.partIndex)
+        draft.extmarkToPart.clear()
+      }),
+    )
+    liveChip = undefined
+    if (text) liveChip = registerLiveChip(chip.start, text)
+    renderLive()
+  }
+  const liveText = (data: Record<string, unknown>) => (typeof data.text === "string" ? data.text : "")
+  event.on("rpc.opencode-ide-bridge.context", (evt, { directory }) => {
+    if (!liveDirectory(directory)) return
+    setLiveChip(liveText(evt.data))
+  })
+  event.on("rpc.opencode-ide-bridge.pin", (evt, { directory }) => {
+    if (!liveDirectory(directory)) return
+    // Commit the chip: it becomes an ordinary file mention, no longer replaced.
+    if (!liveChip && liveText(evt.data)) setLiveChip(liveText(evt.data))
+    liveChip = undefined
+  })
+  event.on("rpc.opencode-ide-bridge.clear", (_evt, { directory }) => {
+    if (!liveDirectory(directory)) return
+    setLiveChip("")
   })
 
   createEffect(() => {
