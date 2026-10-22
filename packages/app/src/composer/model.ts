@@ -2,11 +2,14 @@ import { ImagePreview } from "@opencode/ui/image-preview"
 import { useDialog } from "@opencode/ui/context/dialog"
 import type { ReferenceInfo } from "@opencode/client/promise"
 import type { Links, MountedSession } from "@opencode/gui-extensions/sdk"
-import { createComponent, createEffect, createMemo, on } from "solid-js"
+import { createComponent, createEffect, createMemo, on, onCleanup } from "solid-js"
 import { Predicate } from "effect"
+import { previewSelectedLines } from "@opencode/session-ui/pierre/selection-bridge"
 import type { ComposerSuggestion } from "./types"
 import { createComposerEditor, createComposerEditorState, type ComposerEditorModel } from "./editor/interaction"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/workspaces/files/model"
+import { createLiveFollow } from "./live-follow"
+import { createComposerAttachment } from "./composer-attachment"
 import { useComments } from "@/composer/comments"
 import { useCommand } from "@/shell/commands/command"
 import { useLanguage } from "@/runtime/i18n/language"
@@ -55,6 +58,21 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   const platform = usePlatform()
   const prompt = adapter.state
   let editor: HTMLDivElement | undefined
+
+  onCleanup(
+    createLiveFollow({
+      attachment: createComposerAttachment(prompt),
+      event: sdk().event,
+      // The live chip previews the followed selection; a file the workspace has not loaded has none.
+      preview: (path, selection) => {
+        const content = files.get(path)?.content?.content
+
+        return content
+          ? previewSelectedLines(content, { start: selection.startLine, end: selection.endLine })
+          : undefined
+      },
+    }),
+  )
 
   const interaction = createComposerEditorState(prompt.mode.current())
   createEffect(
