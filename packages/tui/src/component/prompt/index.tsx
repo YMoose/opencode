@@ -49,7 +49,7 @@ import { useConnected } from "../use-connected"
 import { useToast } from "../../ui/toast"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
-import { useConfig } from "../../config"
+import { useConfig, useLiveFollow } from "../../config"
 import { usePromptMove } from "./move"
 import { resolvePastedAttachments } from "./local-attachment"
 import { locationKey, useData } from "../../context/data"
@@ -350,13 +350,15 @@ export function Prompt(props: PromptProps) {
     }, 0)
   })
 
-  // Live IDE follow (upstream editor integration): mirror the editor's current
-  // file/selection as a trailing chip in the prompt. The source is the same
-  // useEditorContext feed the editor-context label uses (Claude-Code-compatible
-  // WebSocket, or Zed polling), so this works without a plugin. The chip is a
-  // real file part + extmark so onContentChange's syncExtmarksWithPromptParts
-  // keeps it aligned; updates rewrite the chip range and re-register it. Keeping
-  // a mention happens through the editor's native @-mention or by submitting.
+  // Live IDE follow (upstream editor integration, "live-follow" experiment):
+  // mirror the editor's current file/selection as a trailing chip in the
+  // prompt. The source is the same useEditorContext feed the editor-context
+  // label uses (Claude-Code-compatible WebSocket, or Zed polling), so this
+  // works without a plugin. The chip is a real file part + extmark so
+  // onContentChange's syncExtmarksWithPromptParts keeps it aligned; updates
+  // rewrite the chip range and re-register it. Keeping a mention happens
+  // through the editor's native @-mention or by submitting.
+  const liveFollow = useLiveFollow()
   let liveChip: { start: number; end: number; extmarkId: number } | undefined
   let liveChipText = ""
   const renderLive = () => {
@@ -439,7 +441,7 @@ export function Prompt(props: PromptProps) {
   }
   createEffect(() => {
     const selection = editorContext()
-    const text = selection ? liveChipTextFor(selection) : ""
+    const text = liveFollow() && selection ? liveChipTextFor(selection) : ""
     // The editor store mints a new selection object per WebSocket message even
     // when the content is identical, so compare the derived chip text.
     if (text === liveChipText) return

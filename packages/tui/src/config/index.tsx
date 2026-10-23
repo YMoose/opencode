@@ -385,3 +385,9 @@ export function useNewDesigns() {
   const config = useConfig()
   return () => config.data.experimental?.["new-designs"] === true
 }
+
+/** Reactive accessor for the temporary "live-follow" experiment. */
+export function useLiveFollow() {
+  const config = useConfig()
+  return () => config.data.experimental?.["live-follow"] === true
+}

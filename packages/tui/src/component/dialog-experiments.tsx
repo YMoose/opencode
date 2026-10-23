@@ -20,6 +20,11 @@ export const experiments: Experiment[] = [
     title: "New designs",
     description: "Preview the new TUI designs",
   },
+  {
+    id: "live-follow",
+    title: "Live IDE follow",
+    description: "Mirror the editor's current file/selection as a prompt chip",
+  },
 ]
 
 export function DialogExperiments() {

@@ -71,7 +71,9 @@ async function open(config?: Config.Info) {
   const editor = startEditor()
   process.env.OPENCODE_EDITOR_SSE_PORT = String(editor.port)
   delete process.env.CLAUDE_CODE_SSE_PORT
-  const setup = await createAppFixture({ config: { animations: false, ...config } })
+  const setup = await createAppFixture({
+    config: { animations: false, experimental: { "live-follow": true }, ...config },
+  })
   await setup.ready
   await setup.waitForFrame((frame) => frame.includes("commands"))
   await editor.connected
@@ -86,6 +88,19 @@ async function open(config?: Config.Info) {
     },
   }
 }
+
+test("live IDE follow stays off without the experiment", async () => {
+  const app = await open({ experimental: { "live-follow": false } })
+  try {
+    app.editor.selection("AAA.ts", 1, 2)
+    // The editor-context label proves the selection arrived; the chip must not appear.
+    await app.setup.waitForFrame((frame) => frame.includes("AAA.ts"))
+    expect(app.prompt().plainText).toBe("")
+    expect(app.prompt().editorView.extmarks.getAll()).toHaveLength(0)
+  } finally {
+    await app.close()
+  }
+})
 
 test("live IDE follow chip replaces the trailing chip in the prompt", async () => {
   const app = await open()
