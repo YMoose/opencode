@@ -350,14 +350,15 @@ export function Prompt(props: PromptProps) {
     }, 0)
   })
 
-  // Live IDE follow (opencode-vsc-bridge plugin): mirror the editor's current
-  // file/selection as a trailing chip in the prompt. The chip is a real file
-  // part + extmark so onContentChange's syncExtmarksWithPromptParts keeps it
-  // aligned; updates rewrite the chip range and re-register it. Local dev
-  // experiment, not upstreamed: no config gate on purpose.
-  let liveChip: { start: number; end: number; extmarkId: number; partIndex: number } | undefined
-  const liveDirectory = (directory: string | undefined) =>
-    directory === (currentLocation.current?.directory ?? data.location.default().directory)
+  // Live IDE follow (upstream editor integration): mirror the editor's current
+  // file/selection as a trailing chip in the prompt. The source is the same
+  // useEditorContext feed the editor-context label uses (Claude-Code-compatible
+  // WebSocket, or Zed polling), so this works without a plugin. The chip is a
+  // real file part + extmark so onContentChange's syncExtmarksWithPromptParts
+  // keeps it aligned; updates rewrite the chip range and re-register it. Keeping
+  // a mention happens through the editor's native @-mention or by submitting.
+  let liveChip: { start: number; end: number; extmarkId: number } | undefined
+  let liveChipText = ""
   const renderLive = () => {
     setTimeout(() => {
       if (!input || input.isDestroyed) return
@@ -385,19 +386,39 @@ export function Prompt(props: PromptProps) {
       url.searchParams.set("start", rangeMatch[1])
       url.searchParams.set("end", rangeMatch[2] ?? rangeMatch[1])
     }
-    let partIndex = 0
     setStore(
       produce((draft) => {
-        partIndex = (draft.prompt.files ??= []).length
-        draft.prompt.files!.push({ uri: url.href, mention: { start, end, text } })
-        draft.extmarkToPart.set(extmarkId, { type: "file", index: partIndex })
+        const files = (draft.prompt.files ??= [])
+        files.push({ uri: url.href, mention: { start, end, text } })
+        draft.extmarkToPart.set(extmarkId, { type: "file", index: files.length - 1 })
       }),
     )
-    return { start, end, extmarkId, partIndex }
+    return { start, end, extmarkId }
+  }
+  // The chip text reuses the label's raw line numbers: a single `start.line`
+  // when the selection is one line, otherwise `start.line-end.line`.
+  const liveChipTextFor = (selection: EditorSelection) => {
+    const base = currentLocation.current?.directory ?? data.location.default().directory
+    const relative = path.relative(base, selection.filePath)
+    // A file outside the working directory has no relative mention form.
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return ""
+    const range = selection.ranges.find(hasEditorRangeSelection)
+    const lines = range
+      ? range.selection.start.line === range.selection.end.line
+        ? `#L${range.selection.start.line}`
+        : `#L${range.selection.start.line}-${range.selection.end.line}`
+      : ""
+    return `@${relative.split(path.sep).join("/")}${lines}`
   }
   const setLiveChip = (text: string) => {
     if (!input || input.isDestroyed) return
-    if (!liveChip) {
+    liveChipText = text
+    const tracked = liveChip ? input.extmarks.get(liveChip.extmarkId) : undefined
+    // Deleting the chip text drops its extmark, so the cached offsets no longer
+    // describe the buffer. Stop tracking and append any new chip at the end
+    // instead of rewriting unrelated text.
+    if (liveChip && !tracked) liveChip = undefined
+    if (!liveChip || !tracked) {
       if (!text) return
       const start = input.plainText.length
       input.insertText(text + " ")
@@ -405,36 +426,24 @@ export function Prompt(props: PromptProps) {
       renderLive()
       return
     }
-    // Rewrite the chip range (chip.end covers the mention; the trailing space
-    // follows it, so extend one char to swallow it and avoid stray doubles).
-    const chip = liveChip
-    const current = input.plainText
-    input.extmarks.clear()
-    input.replaceText(current.slice(0, chip.start) + (text ? text + " " : "") + current.slice(chip.end + 1))
-    setStore(
-      produce((draft) => {
-        draft.prompt.files = (draft.prompt.files ?? []).filter((_, index) => index !== chip.partIndex)
-        draft.extmarkToPart.clear()
-      }),
-    )
-    liveChip = undefined
-    if (text) liveChip = registerLiveChip(chip.start, text)
+    // Replace the chip through a selected-range insert: replaceText() drops
+    // every extmark, while this rewrites only the chip range and keeps ordinary
+    // @-mentions (from the editor's at_mentioned flow) aligned. The sync then
+    // drops the chip's file part and reindexes the surviving ones.
+    const end = input.plainText[tracked.end] === " " ? tracked.end + 1 : tracked.end
+    input.setSelection(tracked.start, end)
+    input.insertText(text ? text + " " : "")
+    syncExtmarksWithPromptParts()
+    liveChip = text ? registerLiveChip(tracked.start, text) : undefined
     renderLive()
   }
-  const liveText = (data: Record<string, unknown>) => (typeof data.text === "string" ? data.text : "")
-  event.on("rpc.opencode-vsc-bridge.context", (evt, { directory }) => {
-    if (!liveDirectory(directory)) return
-    setLiveChip(liveText(evt.data))
-  })
-  event.on("rpc.opencode-vsc-bridge.pin", (evt, { directory }) => {
-    if (!liveDirectory(directory)) return
-    // Commit the chip: it becomes an ordinary file mention, no longer replaced.
-    if (!liveChip && liveText(evt.data)) setLiveChip(liveText(evt.data))
-    liveChip = undefined
-  })
-  event.on("rpc.opencode-vsc-bridge.clear", (_evt, { directory }) => {
-    if (!liveDirectory(directory)) return
-    setLiveChip("")
+  createEffect(() => {
+    const selection = editorContext()
+    const text = selection ? liveChipTextFor(selection) : ""
+    // The editor store mints a new selection object per WebSocket message even
+    // when the content is identical, so compare the derived chip text.
+    if (text === liveChipText) return
+    setLiveChip(text)
   })
 
   createEffect(() => {
@@ -792,6 +801,12 @@ export function Prompt(props: PromptProps) {
   }
 
   function resetComposer() {
+    // The chip is a trailing mention tracked by offsets, so the composer reset
+    // (submit, clear, slash commands, stash) must drop it or the next selection
+    // would rewrite text at stale offsets. Submitting includes it as a normal
+    // file part; the chip only reappears on the next real selection change.
+    liveChip = undefined
+    liveChipText = ""
     input.extmarks.clear()
     setStore("prompt", emptyPrompt())
     setStore("extmarkToPart", new Map())
