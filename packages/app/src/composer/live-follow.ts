@@ -3,11 +3,11 @@ import type { OpenCodeEventStream } from "@/runtime/server/client"
 import { sameFile, type ComposerAttachment, type ComposerAttachmentFile } from "./composer-attachment"
 
 // The commentID the followed chip carries while live-follow owns it.
-const LIVE_FOLLOW_OWNER = "opencode-vsc-bridge.live-follow"
+const LIVE_FOLLOW_OWNER = "editor-bridge.live-follow"
 
-// The opencode-vsc-bridge plugin mirrors the attached editor's current file/selection through these
-// events, so one tracked chip can follow the editor until the user pins it. Every store write goes through
-// `ComposerAttachment`, the seam that mirrors the GUI-extension composer API.
+// The builtin `editor-bridge` server plugin mirrors the attached editor's current file/selection
+// through these events, so one tracked chip can follow the editor until the user pins it. Every store
+// write goes through `ComposerAttachment`, the seam that mirrors the GUI-extension composer API.
 type Options = {
   readonly attachment: ComposerAttachment
   readonly event: OpenCodeEventStream
@@ -48,8 +48,8 @@ export function createLiveFollow(options: Options) {
   }
 
   const stops = [
-    options.event.on("rpc.opencode-vsc-bridge.context", (event) => follow(liveText(event))),
-    options.event.on("rpc.opencode-vsc-bridge.pin", (event) => {
+    options.event.on("rpc.editor-bridge.context", (event) => follow(liveText(event))),
+    options.event.on("rpc.editor-bridge.pin", (event) => {
       // A pin commits the tracked chip: it stays in the context as an unowned chip, no longer replaced.
       const text = liveText(event)
 
@@ -57,7 +57,7 @@ export function createLiveFollow(options: Options) {
       options.attachment.release(LIVE_FOLLOW_OWNER)
       tracked = undefined
     }),
-    options.event.on("rpc.opencode-vsc-bridge.clear", () => {
+    options.event.on("rpc.editor-bridge.clear", () => {
       if (tracked || options.attachment.owned(LIVE_FOLLOW_OWNER)) options.attachment.detach(LIVE_FOLLOW_OWNER)
       tracked = undefined
     }),

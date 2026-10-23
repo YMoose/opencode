@@ -5,10 +5,10 @@ import { createComposerAttachment } from "./composer-attachment"
 import { createLiveFollow } from "./live-follow"
 import { createMemoryComposerState, type ComposerState } from "./state"
 
-const context = "rpc.opencode-vsc-bridge.context"
-const pin = "rpc.opencode-vsc-bridge.pin"
-const clear = "rpc.opencode-vsc-bridge.clear"
-const owner = "opencode-vsc-bridge.live-follow"
+const context = "rpc.editor-bridge.context"
+const pin = "rpc.editor-bridge.pin"
+const clear = "rpc.editor-bridge.clear"
+const owner = "editor-bridge.live-follow"
 
 type Handler = (event: { data: { text?: string } }) => void
 
